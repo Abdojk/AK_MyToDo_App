@@ -1,27 +1,31 @@
 import { TaskCard } from './TaskCard';
 import { EventCard } from './EventCard';
-import { BUCKET_LABEL } from '../model/types';
-import type { Bucket, HubItem, HubTask } from '../model/types';
+import { PlannerCard } from './PlannerCard';
+import { BUCKET_LABEL, itemKey } from '../model/types';
+import type { Bucket, HubItem, HubPlannerTask, HubTask } from '../model/types';
 
 interface Props {
   bucket: Bucket;
   items: HubItem[];
   zone: string;
-  pendingIds: string[];
+  pendingKeys: string[];
   onComplete: (task: HubTask) => void;
   onReschedule: (task: HubTask, due: Date) => void;
+  onCompletePlanner: (task: HubPlannerTask) => void;
+  onReschedulePlanner: (task: HubPlannerTask, due: Date) => void;
 }
 
 export function BucketColumn({
   bucket,
   items,
   zone,
-  pendingIds,
+  pendingKeys,
   onComplete,
   onReschedule,
+  onCompletePlanner,
+  onReschedulePlanner,
 }: Props) {
-  const taskCount = items.filter((i) => i.kind === 'task').length;
-  const eventCount = items.length - taskCount;
+  const eventCount = items.filter((i) => i.kind === 'event').length;
 
   return (
     <section className={`column column-${bucket}`} aria-label={BUCKET_LABEL[bucket]}>
@@ -29,7 +33,7 @@ export function BucketColumn({
         <h2>{BUCKET_LABEL[bucket]}</h2>
         <span
           className="count"
-          aria-label={`${taskCount} tasks, ${eventCount} events`}
+          aria-label={`${items.length - eventCount} tasks, ${eventCount} events`}
         >
           {items.length}
         </span>
@@ -41,25 +45,39 @@ export function BucketColumn({
             —
           </p>
         ) : (
-          items.map((item) =>
-            item.kind === 'task' ? (
-              <TaskCard
-                key={`task-${item.task.id}`}
-                task={item.task}
-                bucket={bucket}
-                zone={zone}
-                pending={pendingIds.includes(item.task.id)}
-                onComplete={onComplete}
-                onReschedule={onReschedule}
-              />
-            ) : (
-              <EventCard
-                key={`event-${item.event.id}`}
-                event={item.event}
-                zone={zone}
-              />
-            ),
-          )
+          items.map((item) => {
+            const key = itemKey(item);
+            const pending = pendingKeys.includes(key);
+
+            if (item.kind === 'task') {
+              return (
+                <TaskCard
+                  key={key}
+                  task={item.task}
+                  bucket={bucket}
+                  zone={zone}
+                  pending={pending}
+                  onComplete={onComplete}
+                  onReschedule={onReschedule}
+                />
+              );
+            }
+
+            if (item.kind === 'planner') {
+              return (
+                <PlannerCard
+                  key={key}
+                  task={item.task}
+                  zone={zone}
+                  pending={pending}
+                  onComplete={onCompletePlanner}
+                  onReschedule={onReschedulePlanner}
+                />
+              );
+            }
+
+            return <EventCard key={key} event={item.event} zone={zone} />;
+          })
         )}
       </div>
     </section>

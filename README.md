@@ -1,11 +1,11 @@
 # AK MyToDo Hub
 
-Every flagged Outlook email and every calendar occurrence in
+Every flagged Outlook email, Planner task, and calendar occurrence in
 `Akhoury@info-sys.com`, laid out by date:
 **Overdue · Today · Tomorrow · Next 7 days · Later · No due date**.
 
-Tasks and meetings share each column, in one chronological stream, so a Thursday
-with four meetings reads as a Thursday with four meetings.
+All three share each column, in one chronological stream, so a Thursday with four
+meetings and two Planner tasks reads as exactly that.
 
 The Hub is a browser-only single-page app. It signs in against the info-sys.com
 Entra ID tenant, reads Microsoft Graph, and renders. There is no server, no
@@ -28,14 +28,18 @@ POST  /$batch  (GET linkedResources per task) → deep link back to each email
 GET   /me/messages?$filter=flag/flagStatus…   → optional: sender name
 PATCH /me/todo/lists/{id}/tasks/{taskId}      → Done and Move to
 GET   /me/calendarView?startDateTime=…        → meetings, 30 days ahead
+GET   /me/planner/tasks                       → Planner tasks assigned to you
+GET   /planner/plans/{id}                     → plan names, batched
+PATCH /planner/tasks/{taskId}                 → Done and Move to, with If-Match
 ```
 
-The `/me/messages` and `/me/calendarView` calls are both best-effort. If the
-tenant or the API rejects either, the Hub says so in a banner and renders
-whatever it did get. Neither can cost the timeline its tasks.
+The `/me/messages`, `/me/calendarView` and `/me/planner/tasks` calls are all
+best-effort. If the tenant or the API rejects any of them, the Hub says so in a
+banner and renders whatever it did get. None can cost the timeline its flagged
+email.
 
-`PATCH` is the only write verb the client issues, and it reaches only the task
-endpoint above. See `src/graph/write.ts`.
+`PATCH` is the only write verb the client issues, and it reaches only the two task
+endpoints above. See `src/graph/write.ts` and `src/graph/planner.ts`.
 
 ## Writing back
 
@@ -76,6 +80,9 @@ Run once, in the info-sys.com tenant.
    | `Tasks.ReadWrite` | The Flagged email list, its tasks, and the two write actions |
    | `Mail.ReadBasic` | Optional: the sender name on each task card |
    | `Calendars.ReadBasic` | Optional: meetings on the timeline |
+
+   `Tasks.ReadWrite` also covers Planner: reading your assigned tasks, reading
+   plan names, and both write actions. Planner needs no permission of its own.
 
 8. Select **Grant admin consent for Info-Sys** if the tenant blocks user consent.
    Skip it if the tenant allows user consent for these delegated scopes.
@@ -128,17 +135,44 @@ src/
 │  ├─ todo.ts            flagged list → tasks → linked resources
 │  ├─ write.ts           completeTask, reopenTask, rescheduleTask
 │  ├─ calendar.ts        calendarView over a 30-day window, optional
+│  ├─ planner.ts         Planner read and writes, ETag handling, optional
 │  └─ mail.ts            optional sender enrichment, joined on subject
 ├─ model/
 │  ├─ types.ts           HubTask, HubEvent, HubItem, Bucket, raw Graph shapes
 │  ├─ dates.ts           dateTimeTimeZone → instant, calendar-day maths
 │  ├─ buckets.ts         bucketOf, groupItems
 │  ├─ events.ts          event filtering, normalising, time formatting
+│  ├─ planner.ts         priority bands, normalising, the task link
 │  ├─ reschedule.ts      preset and typed dates → a Graph dueDateTime
-│  ├─ mutate.ts          optimistic apply, rollback, PATCH-response merge
+│  ├─ mutate.ts          optimistic apply by item key, rollback, response merge
 │  └─ normalise.ts       todoTask + linkedResource → HubTask
-└─ components/           Timeline, BucketColumn, TaskCard, EventCard, SignInPanel
+└─ components/           Timeline, BucketColumn, TaskCard, PlannerCard,
+                         EventCard, TaskActions, SignInPanel
 ```
+
+## Planner
+
+`GET /me/planner/tasks` returns the tasks assigned to you across every plan. Plan
+names come from `GET /planner/plans/{id}`, batched into one request.
+
+Left out: tasks with **no due date**, and tasks at `percentComplete` 100. A
+Planner backlog is largely undated, and the No due date column exists for flagged
+email, so undated Planner work stays out rather than burying it.
+
+Planner cards carry the same **Done** and **Move to** row as flagged email. Two
+differences sit under them:
+
+- `plannerTask.dueDateTime` is a bare `DateTimeOffset` in UTC, not the
+  `dateTimeTimeZone` pair `todoTask` uses, so the write format differs. See
+  `toPlannerDueDate` in `src/model/planner.ts`.
+- Every Planner `PATCH` **requires** an `If-Match` ETag. When the task has changed
+  in Planner since the Hub read it, Graph answers `412`; `src/graph/planner.ts`
+  re-reads the task once for a fresh ETag and retries, and only a second failure
+  reaches the rollback. The write also sends `Prefer: return=representation`,
+  because Planner otherwise answers `204` with no body.
+
+Priority follows Planner's own bands: 0-1 urgent, 2-4 important, 5-7 medium, 8-10
+low. Only urgent and important show a pill, so the column stays quiet.
 
 ## The calendar
 
@@ -209,11 +243,22 @@ mailbox in Graph Explorer, and simplify the code once you know the answer.
 7. **The `responseStatus.response` enum beyond `declined`.** Only that literal
    filters, and anything else counts as not declined, so an unrecognised member
    can never hide an event.
+8. **The Planner deep link.** Microsoft Learn documents no URL for opening a
+   `plannerTask`. The Hub builds
+   `https://tasks.office.com/{tenantId}/Home/Task/{taskId}` from
+   `VITE_TENANT_ID` — the widely used pattern, not a documented one. Confirm it
+   on the first click. Correcting it is a change to `plannerTaskUrl` in
+   `src/model/planner.ts`, and an unset tenant yields no link rather than a
+   broken one.
+9. **Whether `/me/planner/tasks` pages.** No `$top` or `@odata.nextLink` is
+   documented for it. The read goes through `client.getAll`, which follows
+   `@odata.nextLink` when present and returns the single page when not.
 
 ## Not yet built
 
 Accepting, declining, or creating events; other and shared calendars; free/busy
-lookup for other people; a day or week grid view; editing a task's title, body,
-or importance; checklist items; bulk actions across a column; drag and drop
-between columns; Planner tasks; delta-based background sync; notifications; and
-hosting beyond `localhost`. Each is additive. None changes the shape above.
+lookup for other people; a day or week grid view; creating Planner tasks,
+assigning them, or moving buckets; editing any task's title, body, or importance;
+checklist items; bulk actions across a column; drag and drop between columns;
+delta-based background sync; notifications; and hosting beyond `localhost`. Each
+is additive. None changes the shape above.

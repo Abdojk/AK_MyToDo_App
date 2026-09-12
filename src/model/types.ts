@@ -129,7 +129,8 @@ export interface HubEvent {
  */
 export type HubItem =
   | { kind: 'task'; task: HubTask }
-  | { kind: 'event'; event: HubEvent };
+  | { kind: 'event'; event: HubEvent }
+  | { kind: 'planner'; task: HubPlannerTask };
 
 export function taskItem(task: HubTask): HubItem {
   return { kind: 'task', task };
@@ -137,4 +138,58 @@ export function taskItem(task: HubTask): HubItem {
 
 export function eventItem(event: HubEvent): HubItem {
   return { kind: 'event', event };
+}
+
+export function plannerItem(task: HubPlannerTask): HubItem {
+  return { kind: 'planner', task };
+}
+
+/** Stable identity across sources, since ids are only unique within one. */
+export function itemKey(item: HubItem): string {
+  return item.kind === 'event'
+    ? `event:${item.event.id}`
+    : `${item.kind}:${item.task.id}`;
+}
+
+/** Microsoft Graph plannerTask, trimmed to the fields the Hub reads. */
+export interface RawPlannerTask {
+  id: string;
+  title?: string | null;
+  planId?: string | null;
+  bucketId?: string | null;
+  /** A plain DateTimeOffset in UTC, not the dateTimeTimeZone pair todoTask uses. */
+  dueDateTime?: string | null;
+  startDateTime?: string | null;
+  percentComplete?: number | null;
+  priority?: number | null;
+  checklistItemCount?: number | null;
+  activeChecklistItemCount?: number | null;
+  hasDescription?: boolean | null;
+  /** Required on every write, as the If-Match header. */
+  '@odata.etag'?: string | null;
+}
+
+export interface RawPlannerPlan {
+  id: string;
+  title?: string | null;
+}
+
+/** Planner's own reading of the 0-10 priority scale. */
+export type PlannerPriority = 'urgent' | 'important' | 'medium' | 'low';
+
+/** A Planner task as the Hub renders it. */
+export interface HubPlannerTask {
+  id: string;
+  title: string;
+  /** Never null: undated Planner tasks are filtered out before this point. */
+  due: Date;
+  percentComplete: number;
+  priority: PlannerPriority;
+  planId: string;
+  planTitle: string | null;
+  checklistDone: number;
+  checklistTotal: number;
+  /** Kept current from each PATCH response, because writes need If-Match. */
+  etag: string | null;
+  url: string;
 }

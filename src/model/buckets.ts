@@ -35,9 +35,17 @@ export function isClosed(task: HubTask): boolean {
 
 /** The date an item sits on, and whether that date floats. */
 function anchorOf(item: HubItem): { date: Date | null; floating: boolean } {
-  return item.kind === 'task'
-    ? { date: item.task.due, floating: false }
-    : { date: item.event.start, floating: item.event.isAllDay };
+  if (item.kind === 'event') {
+    return { date: item.event.start, floating: item.event.isAllDay };
+  }
+  return { date: item.task.due, floating: false };
+}
+
+/** Finished work leaves the timeline, whichever source it came from. */
+export function isDone(item: HubItem): boolean {
+  if (item.kind === 'task') return isClosed(item.task);
+  if (item.kind === 'planner') return item.task.percentComplete >= 100;
+  return false;
 }
 
 const IMPORTANCE_RANK = { high: 0, normal: 1, low: 2 } as const;
@@ -48,8 +56,12 @@ function compare(a: HubItem, b: HubItem): number {
   if (aTime !== bTime) return aTime - bTime;
 
   // A task's due date sits at local midnight, so on a shared day it already
-  // heads the column. Equal timestamps fall back to task before event.
-  if (a.kind !== b.kind) return a.kind === 'task' ? -1 : 1;
+  // heads the column. Equal timestamps put tasks of either source before an event.
+  if (a.kind !== b.kind) {
+    if (a.kind === 'event') return 1;
+    if (b.kind === 'event') return -1;
+    return a.kind === 'task' ? -1 : 1;
+  }
 
   if (a.kind === 'task' && b.kind === 'task') {
     const rank =
@@ -60,6 +72,10 @@ function compare(a: HubItem, b: HubItem): number {
 
   if (a.kind === 'event' && b.kind === 'event') {
     return a.event.subject.localeCompare(b.event.subject);
+  }
+
+  if (a.kind === 'planner' && b.kind === 'planner') {
+    return a.task.title.localeCompare(b.task.title);
   }
 
   return 0;
@@ -76,7 +92,7 @@ export function groupItems(
   ) as Record<Bucket, HubItem[]>;
 
   for (const item of items) {
-    if (item.kind === 'task' && isClosed(item.task)) continue;
+    if (isDone(item)) continue;
     const { date, floating } = anchorOf(item);
     grouped[bucketOf(date, now, zone, floating)].push(item);
   }

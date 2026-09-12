@@ -8,6 +8,19 @@ function taskPath(listId: string, taskId: string): string {
 }
 
 /**
+ * Update todoTask is documented to answer 200 with the updated task, so an empty
+ * body means something changed at the service and the caller should not guess.
+ */
+function required(raw: RawTodoTask | null): RawTodoTask {
+  if (!raw) {
+    throw new Error(
+      'Microsoft Graph accepted the change but returned no task. Refresh to see the current state.',
+    );
+  }
+  return raw;
+}
+
+/**
  * Mark a task finished.
  *
  * Whether Graph accepts `status` on its own, or requires `completedDateTime`
@@ -21,37 +34,43 @@ export async function completeTask(
 ): Promise<RawTodoTask> {
   const path = taskPath(listId, taskId);
   try {
-    return await client.patch<RawTodoTask>(path, { status: 'completed' });
+    return required(await client.patch<RawTodoTask>(path, { status: 'completed' }));
   } catch (e) {
     if (e instanceof GraphError && e.status === 400) {
-      return client.patch<RawTodoTask>(path, {
-        status: 'completed',
-        completedDateTime: toGraphDate(new Date()),
-      });
+      return required(
+        await client.patch<RawTodoTask>(path, {
+          status: 'completed',
+          completedDateTime: toGraphDate(new Date()),
+        }),
+      );
     }
     throw e;
   }
 }
 
 /** Reopen a task completed by mistake. */
-export function reopenTask(
+export async function reopenTask(
   client: GraphClient,
   listId: string,
   taskId: string,
 ): Promise<RawTodoTask> {
-  return client.patch<RawTodoTask>(taskPath(listId, taskId), {
-    status: 'notStarted',
-  });
+  return required(
+    await client.patch<RawTodoTask>(taskPath(listId, taskId), {
+      status: 'notStarted',
+    }),
+  );
 }
 
 /** Move a task's due date. Graph accepts dueDateTime on its own. */
-export function rescheduleTask(
+export async function rescheduleTask(
   client: GraphClient,
   listId: string,
   taskId: string,
   due: Date,
 ): Promise<RawTodoTask> {
-  return client.patch<RawTodoTask>(taskPath(listId, taskId), {
-    dueDateTime: toGraphDate(due),
-  });
+  return required(
+    await client.patch<RawTodoTask>(taskPath(listId, taskId), {
+      dueDateTime: toGraphDate(due),
+    }),
+  );
 }

@@ -98,16 +98,28 @@ export class GraphClient {
     return (await response.json()) as T;
   }
 
-  /** Single PATCH. The only write the client makes. */
-  async patch<T>(path: string, body: unknown): Promise<T> {
+  /**
+   * Single PATCH. The only write verb the client issues.
+   *
+   * Returns null when the server answers 204 with no content, which Planner does
+   * unless the caller asks for a representation. The caller decides whether to
+   * re-read or carry on.
+   */
+  async patch<T>(
+    path: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+  ): Promise<T | null> {
     const url = GraphClient.absolute(path);
     const response = await this.request(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
     if (!response.ok) throw await GraphClient.toError(response, url);
-    return (await response.json()) as T;
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? (JSON.parse(text) as T) : null;
   }
 
   /** GET a collection, following @odata.nextLink until the server stops paging. */

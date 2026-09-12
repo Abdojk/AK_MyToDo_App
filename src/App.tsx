@@ -1,22 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IPublicClientApplication } from '@azure/msal-browser';
 import { useAuth } from './auth/useAuth';
-import { isConfigured } from './auth/msalConfig';
+import { isConfigured, tenantId } from './auth/msalConfig';
 import { GraphClient } from './graph/client';
 import { loadFlaggedTasks } from './graph/todo';
 import { completeTask, reopenTask, rescheduleTask } from './graph/write';
 import { enrichTasks, fetchFlaggedMessages } from './graph/mail';
 import { HORIZON_DAYS, fetchCalendarEvents } from './graph/calendar';
+import {
+  completePlannerTask,
+  fetchPlannerTasks,
+  reopenPlannerTask,
+  reschedulePlannerTask,
+} from './graph/planner';
 import { SignInPanel } from './components/SignInPanel';
 import { Timeline } from './components/Timeline';
 import { viewerZone } from './model/dates';
 import { normaliseTask } from './model/normalise';
-import { applyTask, mergeWritten } from './model/mutate';
-import { eventItem, taskItem } from './model/types';
-import type { HubEvent, HubItem, HubTask, RawTodoTask } from './model/types';
+import { applyItem, mergeWritten } from './model/mutate';
+import { eventItem, itemKey, plannerItem, taskItem } from './model/types';
+import type { HubItem, HubPlannerTask, HubTask } from './model/types';
 
 interface Props {
   msal: IPublicClientApplication;
+}
+
+/** Which optional sources answered on the last read. */
+interface Sources {
+  senders: boolean;
+  calendar: boolean;
+  planner: boolean;
 }
 
 export function App({ msal }: Props) {
@@ -25,17 +38,19 @@ export function App({ msal }: Props) {
   const zone = viewerZone();
 
   const [listId, setListId] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<HubTask[]>([]);
+  const [items, setItems] = useState<HubItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [events, setEvents] = useState<HubEvent[]>([]);
-  const [enriched, setEnriched] = useState(false);
-  const [calendarOn, setCalendarOn] = useState(true);
+  const [sources, setSources] = useState<Sources>({
+    senders: true,
+    calendar: true,
+    planner: true,
+  });
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [now, setNow] = useState(() => new Date());
 
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
-  const [undoTask, setUndoTask] = useState<HubTask | null>(null);
+  const [pendingKeys, setPendingKeys] = useState<string[]>([]);
+  const [undoItem, setUndoItem] = useState<HubItem | null>(null);
   // Guards against a second click landing on a write that is still in flight.
   const inFlight = useRef(new Set<string>());
 
@@ -48,19 +63,28 @@ export function App({ msal }: Props) {
       const { listId: flaggedListId, tasks: flagged } = await loadFlaggedTasks(client);
       setListId(flaggedListId);
 
-      // Sender names and the calendar are both optional. A failure in either
-      // must not cost the timeline its tasks.
+      // Senders, calendar and Planner are all optional. A failure in any of them
+      // must not cost the timeline its flagged email.
       const readAt = new Date();
-      const [messages, calendar] = await Promise.all([
+      const [messages, calendar, planner] = await Promise.all([
         fetchFlaggedMessages(client),
         fetchCalendarEvents(client, readAt, zone),
+        fetchPlannerTasks(client, tenantId),
       ]);
-      setEnriched(messages !== null);
-      setTasks(messages ? enrichTasks(flagged, messages) : flagged);
-      setCalendarOn(calendar !== null);
-      setEvents(calendar ?? []);
 
-      setUndoTask(null);
+      const tasks = messages ? enrichTasks(flagged, messages) : flagged;
+      setSources({
+        senders: messages !== null,
+        calendar: calendar !== null,
+        planner: planner !== null,
+      });
+      setItems([
+        ...tasks.map(taskItem),
+        ...(planner ?? []).map(plannerItem),
+        ...(calendar ?? []).map(eventItem),
+      ]);
+
+      setUndoItem(null);
       setNow(new Date());
       setLastRefresh(new Date());
     } catch (e) {
@@ -83,70 +107,159 @@ export function App({ msal }: Props) {
   /**
    * Apply a write.
    *
-   * The optimistic task lands first, so the card moves column or leaves the
-   * timeline on the click. A rejection restores the task exactly as it was: the
-   * timeline must never show a change the mailbox does not hold.
+   * The optimistic item lands first, so the card moves column or leaves the
+   * timeline on the click. A rejection restores the item exactly as it was: the
+   * timeline must never show a change the service does not hold.
+   *
+   * `call` returns the item the service now holds, or null when the service
+   * accepted the change but returned nothing worth rendering — a completed
+   * Planner task, for instance, which the optimistic state already describes.
    */
   const mutate = useCallback(
     async (
-      previous: HubTask,
-      optimistic: HubTask,
-      call: (client: GraphClient, listId: string) => Promise<RawTodoTask>,
+      previous: HubItem,
+      optimistic: HubItem,
+      call: (client: GraphClient) => Promise<HubItem | null>,
     ): Promise<boolean> => {
-      if (!listId || inFlight.current.has(previous.id)) return false;
+      const key = itemKey(previous);
+      if (inFlight.current.has(key)) return false;
 
-      inFlight.current.add(previous.id);
-      setPendingIds([...inFlight.current]);
-      setTasks((current) => applyTask(current, optimistic));
+      inFlight.current.add(key);
+      setPendingKeys([...inFlight.current]);
+      setItems((current) => applyItem(current, optimistic));
       setLoadError(null);
 
       try {
-        const raw = await call(new GraphClient(auth.getToken), listId);
-        setTasks((current) =>
-          applyTask(current, mergeWritten(previous, normaliseTask(raw, []))),
-        );
+        const fresh = await call(new GraphClient(auth.getToken));
+        if (fresh) setItems((current) => applyItem(current, fresh));
         return true;
       } catch (e) {
-        setTasks((current) => applyTask(current, previous));
+        setItems((current) => applyItem(current, previous));
         setLoadError(e instanceof Error ? e.message : String(e));
         return false;
       } finally {
-        inFlight.current.delete(previous.id);
-        setPendingIds([...inFlight.current]);
+        inFlight.current.delete(key);
+        setPendingKeys([...inFlight.current]);
       }
     },
-    [listId, auth.getToken],
+    [auth.getToken],
   );
+
+  // Flagged email, through Microsoft To Do.
 
   const handleComplete = useCallback(
     async (task: HubTask) => {
+      if (!listId) return;
+      const previous = taskItem(task);
       const done = await mutate(
-        task,
-        { ...task, status: 'completed' },
-        (client, id) => completeTask(client, id, task.id),
+        previous,
+        taskItem({ ...task, status: 'completed' }),
+        async (client) =>
+          taskItem(
+            mergeWritten(
+              task,
+              normaliseTask(await completeTask(client, listId, task.id), []),
+            ),
+          ),
       );
-      if (done) setUndoTask(task);
+      if (done) setUndoItem(previous);
+    },
+    [mutate, listId],
+  );
+
+  const handleReschedule = useCallback(
+    (task: HubTask, due: Date) => {
+      if (!listId) return;
+      void mutate(
+        taskItem(task),
+        taskItem({ ...task, due }),
+        async (client) =>
+          taskItem(
+            mergeWritten(
+              task,
+              normaliseTask(await rescheduleTask(client, listId, task.id, due), []),
+            ),
+          ),
+      );
+    },
+    [mutate, listId],
+  );
+
+  // Planner.
+
+  const handleCompletePlanner = useCallback(
+    async (task: HubPlannerTask) => {
+      const previous = plannerItem(task);
+      const done = await mutate(
+        previous,
+        plannerItem({ ...task, percentComplete: 100 }),
+        async (client) => {
+          const fresh = await completePlannerTask(client, task, tenantId);
+          return fresh ? plannerItem(fresh) : null;
+        },
+      );
+      if (done) setUndoItem(previous);
+    },
+    [mutate],
+  );
+
+  const handleReschedulePlanner = useCallback(
+    (task: HubPlannerTask, due: Date) => {
+      void mutate(
+        plannerItem(task),
+        plannerItem({ ...task, due }),
+        async (client) => {
+          const fresh = await reschedulePlannerTask(client, task, due, tenantId);
+          return fresh ? plannerItem(fresh) : null;
+        },
+      );
     },
     [mutate],
   );
 
   const handleUndo = useCallback(async () => {
-    if (!undoTask) return;
-    const done = await mutate(
-      { ...undoTask, status: 'completed' },
-      undoTask,
-      (client, id) => reopenTask(client, id, undoTask.id),
-    );
-    if (done) setUndoTask(null);
-  }, [mutate, undoTask]);
+    if (!undoItem) return;
 
-  const handleReschedule = useCallback(
-    (task: HubTask, due: Date) =>
-      mutate(task, { ...task, due }, (client, id) =>
-        rescheduleTask(client, id, task.id, due),
-      ).then(() => undefined),
-    [mutate],
-  );
+    if (undoItem.kind === 'task') {
+      if (!listId) return;
+      const task = undoItem.task;
+      const done = await mutate(
+        taskItem({ ...task, status: 'completed' }),
+        undoItem,
+        async (client) =>
+          taskItem(
+            mergeWritten(task, normaliseTask(await reopenTask(client, listId, task.id), [])),
+          ),
+      );
+      if (done) setUndoItem(null);
+      return;
+    }
+
+    if (undoItem.kind === 'planner') {
+      const task = undoItem.task;
+      const done = await mutate(
+        plannerItem({ ...task, percentComplete: 100 }),
+        undoItem,
+        async (client) => {
+          const fresh = await reopenPlannerTask(client, task, tenantId);
+          return fresh ? plannerItem(fresh) : undoItem;
+        },
+      );
+      if (done) setUndoItem(null);
+    }
+  }, [mutate, undoItem, listId]);
+
+  const counts = useMemo(() => {
+    let tasks = 0;
+    let planner = 0;
+    let events = 0;
+    for (const item of items) {
+      if (item.kind === 'task' && item.task.status !== 'completed') tasks += 1;
+      if (item.kind === 'planner' && item.task.percentComplete < 100) planner += 1;
+      if (item.kind === 'event') events += 1;
+    }
+    return { tasks, planner, events };
+  }, [items]);
 
   if (!auth.account) {
     return (
@@ -161,8 +274,9 @@ export function App({ msal }: Props) {
     );
   }
 
-  const openCount = tasks.filter((t) => t.status !== 'completed').length;
-  const items: HubItem[] = [...tasks.map(taskItem), ...events.map(eventItem)];
+  const undoTitle =
+    undoItem && undoItem.kind !== 'event' ? undoItem.task.title : null;
+  const quiet = !loading && !loadError;
 
   return (
     <main className="shell">
@@ -170,9 +284,10 @@ export function App({ msal }: Props) {
         <div>
           <h1>AK MyToDo Hub</h1>
           <p className="lede">
-            {openCount} flagged {openCount === 1 ? 'email' : 'emails'}
-            {calendarOn &&
-              `, ${events.length} ${events.length === 1 ? 'event' : 'events'} to ${HORIZON_DAYS} days`}{' '}
+            {counts.tasks} flagged {counts.tasks === 1 ? 'email' : 'emails'}
+            {sources.planner && `, ${counts.planner} Planner`}
+            {sources.calendar &&
+              `, ${counts.events} ${counts.events === 1 ? 'event' : 'events'} to ${HORIZON_DAYS} days`}{' '}
             · {auth.account.username} · {zone}
           </p>
         </div>
@@ -188,25 +303,31 @@ export function App({ msal }: Props) {
 
       {loadError && <div className="notice notice-error">{loadError}</div>}
 
-      {!enriched && !loading && !loadError && (
+      {!sources.senders && quiet && (
         <div className="notice">
-          Sender names are unavailable for this mailbox. The timeline below reads
+          Sender names are unavailable for this mailbox. Flagged email below reads
           from Microsoft To Do alone.
         </div>
       )}
 
-      {!calendarOn && !loading && !loadError && (
+      {!sources.calendar && quiet && (
         <div className="notice">
-          Calendar access is unavailable for this account. The timeline below
-          shows tasks only. Add <code>Calendars.ReadBasic</code> to the app
-          registration to see meetings.
+          Calendar access is unavailable for this account. Add{' '}
+          <code>Calendars.ReadBasic</code> to the app registration to see meetings.
         </div>
       )}
 
-      {undoTask && (
+      {!sources.planner && quiet && (
+        <div className="notice">
+          Planner is unavailable for this account. The timeline shows flagged email
+          and meetings only.
+        </div>
+      )}
+
+      {undoTitle && (
         <div className="notice undo-bar">
           <span>
-            Marked done: <strong>{undoTask.title}</strong>
+            Marked done: <strong>{undoTitle}</strong>
           </span>
           <button type="button" onClick={() => void handleUndo()}>
             Undo
@@ -218,15 +339,17 @@ export function App({ msal }: Props) {
         items={items}
         now={now}
         zone={zone}
-        pendingIds={pendingIds}
+        pendingKeys={pendingKeys}
         onComplete={handleComplete}
         onReschedule={handleReschedule}
+        onCompletePlanner={handleCompletePlanner}
+        onReschedulePlanner={handleReschedulePlanner}
       />
 
       <footer className="foot">
         {lastRefresh
-          ? `Last read ${lastRefresh.toLocaleTimeString('en-GB')}. Writes reach Microsoft To Do only.`
-          : 'Writes reach Microsoft To Do only.'}
+          ? `Last read ${lastRefresh.toLocaleTimeString('en-GB')}. Writes reach Microsoft To Do and Planner only.`
+          : 'Writes reach Microsoft To Do and Planner only.'}
       </footer>
     </main>
   );
