@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Central task Hub over Outlook flagged email, read-only, Microsoft Graph",
   "scripts": {
+    "start": "node setup.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

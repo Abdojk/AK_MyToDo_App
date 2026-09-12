@@ -129,15 +129,42 @@ falling back to a popup.
 
 ## Run it
 
+On Windows, double-click **`start.cmd`**. On any platform, `npm start`.
+
+Either one installs dependencies if they are missing, asks for the two IDs from
+step 0 if `.env` does not already hold them, starts the server, and opens
+`http://localhost:5173`. Run it again later and it goes straight to the server.
+
+Leave the window open while you use the Hub. `Ctrl+C` stops it.
+
+Non-interactively, pass the IDs instead of being asked:
+
+```bash
+node setup.mjs --client <application-id> --tenant <directory-id>
+```
+
+The manual equivalent, if you would rather see each step:
+
 ```bash
 cp .env.example .env     # then paste in the client and tenant IDs from step 0
 npm install
 npm run dev              # http://localhost:5173
 ```
 
+### If it does not start
+
+| What you see | What it means |
+|---|---|
+| `Node.js is not installed` | Install the current release from [nodejs.org](https://nodejs.org), then try again |
+| `This needs Node 20 or later` | Your Node is too old; install the current release |
+| `Something is already using port 5173` | The Hub may be running: open `http://localhost:5173` first. The port is fixed because the Entra redirect URI names it |
+| **Configuration missing** in the page | `.env` is absent or still holds the placeholder GUIDs. Delete `.env` and run `start.cmd` again |
+| A consent error on sign-in | Step 0.8 was skipped and your tenant requires admin consent |
+
 | Script | Does |
 |---|---|
-| `npm run dev` | Development server on port 5173 |
+| `npm start` | Set up if needed, then run the development server and open it |
+| `npm run dev` | Development server on port 5173, no setup |
 | `npm test` | Unit tests for the bucketing and normalisation logic |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | Type check, then a production bundle in `dist/` |
