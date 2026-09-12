@@ -92,10 +92,21 @@ export async function attachLinkedResources(
   return byTask;
 }
 
+export interface FlaggedRead {
+  /** The Flagged email list id, which every write needs. */
+  listId: string;
+  tasks: HubTask[];
+}
+
 /** The whole read: flagged list, its tasks, their links, normalised for the UI. */
-export async function loadFlaggedTasks(client: GraphClient): Promise<HubTask[]> {
+export async function loadFlaggedTasks(
+  client: GraphClient,
+): Promise<FlaggedRead> {
   const list = await getFlaggedList(client);
   const raw = await getTasks(client, list.id);
   const links = await attachLinkedResources(client, list.id, raw);
-  return raw.map((task) => normaliseTask(task, links.get(task.id) ?? []));
+  return {
+    listId: list.id,
+    tasks: raw.map((task) => normaliseTask(task, links.get(task.id) ?? [])),
+  };
 }

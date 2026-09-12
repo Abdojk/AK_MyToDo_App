@@ -34,9 +34,9 @@ export function SignInPanel({ onSignIn, busy, error, configured }: Props) {
       {error && <div className="notice notice-error">{error}</div>}
 
       <p className="fine">
-        The Hub reads only. It requests <code>User.Read</code>,{' '}
-        <code>Tasks.Read</code>, and <code>Mail.ReadBasic</code>, and never writes
-        to the mailbox.
+        The Hub requests <code>User.Read</code>, <code>Tasks.ReadWrite</code>, and{' '}
+        <code>Mail.ReadBasic</code>. It writes only to your Microsoft To Do tasks,
+        to mark one done or move its due date. Mail access stays read-only.
       </p>
     </div>
   );

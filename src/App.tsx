@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IPublicClientApplication } from '@azure/msal-browser';
 import { useAuth } from './auth/useAuth';
 import { isConfigured } from './auth/msalConfig';
 import { GraphClient } from './graph/client';
 import { loadFlaggedTasks } from './graph/todo';
+import { completeTask, reopenTask, rescheduleTask } from './graph/write';
 import { enrichTasks, fetchFlaggedMessages } from './graph/mail';
 import { SignInPanel } from './components/SignInPanel';
 import { Timeline } from './components/Timeline';
 import { viewerZone } from './model/dates';
-import type { HubTask } from './model/types';
+import { normaliseTask } from './model/normalise';
+import { applyTask, mergeWritten } from './model/mutate';
+import type { HubTask, RawTodoTask } from './model/types';
 
 interface Props {
   msal: IPublicClientApplication;
@@ -19,6 +22,7 @@ export function App({ msal }: Props) {
   const configured = isConfigured();
   const zone = viewerZone();
 
+  const [listId, setListId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<HubTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -26,19 +30,26 @@ export function App({ msal }: Props) {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [now, setNow] = useState(() => new Date());
 
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const [undoTask, setUndoTask] = useState<HubTask | null>(null);
+  // Guards against a second click landing on a write that is still in flight.
+  const inFlight = useRef(new Set<string>());
+
   const refresh = useCallback(async () => {
     if (!auth.account) return;
     setLoading(true);
     setLoadError(null);
     try {
       const client = new GraphClient(auth.getToken);
-      const flagged = await loadFlaggedTasks(client);
+      const { listId: flaggedListId, tasks: flagged } = await loadFlaggedTasks(client);
+      setListId(flaggedListId);
 
       // Sender names are a bonus. A failure here must not cost the timeline.
       const messages = await fetchFlaggedMessages(client);
       setEnriched(messages !== null);
       setTasks(messages ? enrichTasks(flagged, messages) : flagged);
 
+      setUndoTask(null);
       setNow(new Date());
       setLastRefresh(new Date());
     } catch (e) {
@@ -57,6 +68,74 @@ export function App({ msal }: Props) {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  /**
+   * Apply a write.
+   *
+   * The optimistic task lands first, so the card moves column or leaves the
+   * timeline on the click. A rejection restores the task exactly as it was: the
+   * timeline must never show a change the mailbox does not hold.
+   */
+  const mutate = useCallback(
+    async (
+      previous: HubTask,
+      optimistic: HubTask,
+      call: (client: GraphClient, listId: string) => Promise<RawTodoTask>,
+    ): Promise<boolean> => {
+      if (!listId || inFlight.current.has(previous.id)) return false;
+
+      inFlight.current.add(previous.id);
+      setPendingIds([...inFlight.current]);
+      setTasks((current) => applyTask(current, optimistic));
+      setLoadError(null);
+
+      try {
+        const raw = await call(new GraphClient(auth.getToken), listId);
+        setTasks((current) =>
+          applyTask(current, mergeWritten(previous, normaliseTask(raw, []))),
+        );
+        return true;
+      } catch (e) {
+        setTasks((current) => applyTask(current, previous));
+        setLoadError(e instanceof Error ? e.message : String(e));
+        return false;
+      } finally {
+        inFlight.current.delete(previous.id);
+        setPendingIds([...inFlight.current]);
+      }
+    },
+    [listId, auth.getToken],
+  );
+
+  const handleComplete = useCallback(
+    async (task: HubTask) => {
+      const done = await mutate(
+        task,
+        { ...task, status: 'completed' },
+        (client, id) => completeTask(client, id, task.id),
+      );
+      if (done) setUndoTask(task);
+    },
+    [mutate],
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!undoTask) return;
+    const done = await mutate(
+      { ...undoTask, status: 'completed' },
+      undoTask,
+      (client, id) => reopenTask(client, id, undoTask.id),
+    );
+    if (done) setUndoTask(null);
+  }, [mutate, undoTask]);
+
+  const handleReschedule = useCallback(
+    (task: HubTask, due: Date) =>
+      mutate(task, { ...task, due }, (client, id) =>
+        rescheduleTask(client, id, task.id, due),
+      ).then(() => undefined),
+    [mutate],
+  );
 
   if (!auth.account) {
     return (
@@ -102,12 +181,30 @@ export function App({ msal }: Props) {
         </div>
       )}
 
-      <Timeline tasks={tasks} now={now} zone={zone} />
+      {undoTask && (
+        <div className="notice undo-bar">
+          <span>
+            Marked done: <strong>{undoTask.title}</strong>
+          </span>
+          <button type="button" onClick={() => void handleUndo()}>
+            Undo
+          </button>
+        </div>
+      )}
+
+      <Timeline
+        tasks={tasks}
+        now={now}
+        zone={zone}
+        pendingIds={pendingIds}
+        onComplete={handleComplete}
+        onReschedule={handleReschedule}
+      />
 
       <footer className="foot">
         {lastRefresh
-          ? `Last read ${lastRefresh.toLocaleTimeString('en-GB')}. Read-only: the Hub never writes to the mailbox.`
-          : 'Read-only: the Hub never writes to the mailbox.'}
+          ? `Last read ${lastRefresh.toLocaleTimeString('en-GB')}. Writes reach Microsoft To Do only.`
+          : 'Writes reach Microsoft To Do only.'}
       </footer>
     </main>
   );

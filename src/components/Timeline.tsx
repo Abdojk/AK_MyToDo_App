@@ -7,9 +7,19 @@ interface Props {
   tasks: HubTask[];
   now: Date;
   zone: string;
+  pendingIds: string[];
+  onComplete: (task: HubTask) => void;
+  onReschedule: (task: HubTask, due: Date) => void;
 }
 
-export function Timeline({ tasks, now, zone }: Props) {
+export function Timeline({
+  tasks,
+  now,
+  zone,
+  pendingIds,
+  onComplete,
+  onReschedule,
+}: Props) {
   const grouped = groupByBucket(tasks, now, zone);
 
   return (
@@ -20,6 +30,9 @@ export function Timeline({ tasks, now, zone }: Props) {
           bucket={bucket}
           tasks={grouped[bucket]}
           zone={zone}
+          pendingIds={pendingIds}
+          onComplete={onComplete}
+          onReschedule={onReschedule}
         />
       ))}
     </div>

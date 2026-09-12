@@ -36,10 +36,11 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Microsoft Graph reader.
+ * Microsoft Graph client.
  *
- * Every method is a read. The client issues GET, and the one POST it makes is to
- * /$batch carrying GET requests only, so the Hub cannot alter the mailbox.
+ * Reads issue GET, and the one POST is to /$batch carrying GET requests only. The
+ * single write verb is PATCH, which reaches only the To Do task endpoints in
+ * graph/write.ts. Nothing here touches the message resource with a write.
  */
 export class GraphClient {
   constructor(private readonly getToken: () => Promise<string>) {}
@@ -93,6 +94,18 @@ export class GraphClient {
   async get<T>(path: string): Promise<T> {
     const url = GraphClient.absolute(path);
     const response = await this.request(url);
+    if (!response.ok) throw await GraphClient.toError(response, url);
+    return (await response.json()) as T;
+  }
+
+  /** Single PATCH. The only write the client makes. */
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    const url = GraphClient.absolute(path);
+    const response = await this.request(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     if (!response.ok) throw await GraphClient.toError(response, url);
     return (await response.json()) as T;
   }

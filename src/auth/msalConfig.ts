@@ -58,12 +58,15 @@ export function buildMsalConfig(): Configuration {
 }
 
 /**
- * Read-only delegated scopes.
+ * Delegated scopes.
  *
- * Mail.ReadBasic backs the optional sender enrichment. Remove it here and from
- * the app registration to run the Hub on Microsoft To Do data alone.
+ * Tasks.ReadWrite covers both the read and the two writes the Hub makes, complete
+ * and reschedule; Graph offers no narrower permission for updating a task. Mail
+ * stays read-only: the Hub never writes to the message resource. Remove
+ * Mail.ReadBasic here and from the app registration to drop sender names and run
+ * on Microsoft To Do data alone.
  */
-export const graphScopes = ['User.Read', 'Tasks.Read', 'Mail.ReadBasic'];
+export const graphScopes = ['User.Read', 'Tasks.ReadWrite', 'Mail.ReadBasic'];
 
 export const loginRequest: PopupRequest = { scopes: graphScopes };
 

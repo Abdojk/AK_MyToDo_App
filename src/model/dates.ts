@@ -9,7 +9,7 @@ const MS_PER_DAY = 86_400_000;
  * compares days rather than raw milliseconds.
  */
 
-interface WallClock {
+export interface WallClock {
   year: number;
   month: number;
   day: number;
@@ -68,6 +68,36 @@ function zoneOffsetMs(instant: Date, zone: string): number {
   return asIfUtc - instant.getTime();
 }
 
+/**
+ * The instant at which the given wall-clock time occurs in `zone`.
+ *
+ * Two passes settle the offset across a daylight-saving boundary: the first uses
+ * the offset at the guessed instant, the second the offset at the corrected one.
+ */
+export function wallClockToInstant(wall: WallClock, zone: string): Date {
+  const asUtc = Date.UTC(
+    wall.year,
+    wall.month - 1,
+    wall.day,
+    wall.hour,
+    wall.minute,
+    wall.second,
+  );
+  if (!zone || zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT') {
+    return new Date(asUtc);
+  }
+  if (!isSupportedZone(zone)) return new Date(asUtc);
+
+  let ts = asUtc - zoneOffsetMs(new Date(asUtc), zone);
+  ts = asUtc - zoneOffsetMs(new Date(ts), zone);
+  return new Date(ts);
+}
+
+/** The calendar date and clock time the instant shows in `zone`. */
+export function civilParts(instant: Date, zone: string): WallClock {
+  return partsOf(instant, isSupportedZone(zone) ? zone : 'UTC');
+}
+
 /** True when Intl accepts the zone name. Graph can return Windows zone names. */
 export function isSupportedZone(zone: string): boolean {
   try {
@@ -93,32 +123,12 @@ export function resolveGraphDateTime(
   const wall = parseWallClock(value.dateTime);
   if (!wall) return null;
 
-  const asUtc = Date.UTC(
-    wall.year,
-    wall.month - 1,
-    wall.day,
-    wall.hour,
-    wall.minute,
-    wall.second,
-  );
-
-  const zone = value.timeZone?.trim();
-  if (!zone || zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT') {
-    return new Date(asUtc);
-  }
-  if (!isSupportedZone(zone)) return new Date(asUtc);
-
-  // Two passes settle the offset across a daylight-saving boundary.
-  let ts = asUtc - zoneOffsetMs(new Date(asUtc), zone);
-  ts = asUtc - zoneOffsetMs(new Date(ts), zone);
-  return new Date(ts);
+  return wallClockToInstant(wall, value.timeZone?.trim() ?? 'UTC');
 }
 
 /** Days since the Unix epoch for the calendar date the instant falls on in `zone`. */
 export function civilDayNumber(instant: Date, zone: string): number {
-  const p = isSupportedZone(zone)
-    ? partsOf(instant, zone)
-    : partsOf(instant, 'UTC');
+  const p = civilParts(instant, zone);
   return Math.floor(Date.UTC(p.year, p.month - 1, p.day) / MS_PER_DAY);
 }
 
@@ -139,6 +149,6 @@ const MONTHS = [
  * as "Sept" and the house format is a three-letter month.
  */
 export function formatDueDate(due: Date, zone: string): string {
-  const p = isSupportedZone(zone) ? partsOf(due, zone) : partsOf(due, 'UTC');
+  const p = civilParts(due, zone);
   return `${p.day} ${MONTHS[p.month - 1]} ${p.year}`;
 }

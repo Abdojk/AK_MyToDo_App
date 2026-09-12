@@ -6,9 +6,19 @@ interface Props {
   bucket: Bucket;
   tasks: HubTask[];
   zone: string;
+  pendingIds: string[];
+  onComplete: (task: HubTask) => void;
+  onReschedule: (task: HubTask, due: Date) => void;
 }
 
-export function BucketColumn({ bucket, tasks, zone }: Props) {
+export function BucketColumn({
+  bucket,
+  tasks,
+  zone,
+  pendingIds,
+  onComplete,
+  onReschedule,
+}: Props) {
   return (
     <section className={`column column-${bucket}`} aria-label={BUCKET_LABEL[bucket]}>
       <header className="column-head">
@@ -25,7 +35,15 @@ export function BucketColumn({ bucket, tasks, zone }: Props) {
           </p>
         ) : (
           tasks.map((task) => (
-            <TaskCard key={task.id} task={task} bucket={bucket} zone={zone} />
+            <TaskCard
+              key={task.id}
+              task={task}
+              bucket={bucket}
+              zone={zone}
+              pending={pendingIds.includes(task.id)}
+              onComplete={onComplete}
+              onReschedule={onReschedule}
+            />
           ))
         )}
       </div>

@@ -257,3 +257,74 @@ button.ghost { background: transparent; }
 @media (max-width: 520px) {
   .timeline { grid-template-columns: 1fr; }
 }
+
+/* Card actions */
+
+.card-actions {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+.card-pending { opacity: 0.55; }
+
+button.done {
+  justify-self: start;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+button.done:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.move-label { color: var(--ink-soft); }
+
+button.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link-button:hover:not(:disabled) { text-decoration-thickness: 2px; }
+button.link-button:disabled { color: var(--ink-soft); text-decoration: none; }
+
+.move-date {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Undo */
+
+.undo-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
