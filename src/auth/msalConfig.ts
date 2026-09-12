@@ -4,27 +4,73 @@ import { LogLevel } from '@azure/msal-browser';
 function required(name: string, value: string | undefined): string {
   if (!value || value.startsWith('00000000-')) {
     throw new Error(
-      `${name} is not set. Copy .env.example to .env and fill in the values from the Entra ID app registration (see README).`,
+      `${name} is not set. Run start.cmd, or edit config.json beside the page, ` +
+        'with the values from the Entra ID app registration (see README).',
     );
   }
   return value;
 }
 
-export const clientId = import.meta.env.VITE_CLIENT_ID as string | undefined;
-export const tenantId = import.meta.env.VITE_TENANT_ID as string | undefined;
+export interface HubConfig {
+  clientId?: string;
+  tenantId?: string;
+  redirectUri?: string;
+}
+
+/**
+ * Configuration read at startup, not compiled in.
+ *
+ * Vite replaces import.meta.env.VITE_* at build time, so a bundle built without
+ * the IDs is permanently stuck without them. config.json is fetched when the app
+ * starts instead, which lets one build serve any tenant: host the bundle, edit
+ * one text file beside it, done. The .env values remain the fallback, so
+ * `npm run dev` keeps working exactly as before.
+ */
+let runtime: HubConfig = {};
+
+const fromEnv = (key: string): string | undefined => {
+  const value = (import.meta.env as Record<string, string | undefined>)[key];
+  return value && !value.startsWith('00000000-') ? value : undefined;
+};
+
+const clean = (value: string | undefined): string | undefined =>
+  value && value.trim() && !value.trim().startsWith('00000000-') ? value.trim() : undefined;
+
+/** Fetch config.json beside the page. A missing or unreadable file is not an error. */
+export async function loadRuntimeConfig(): Promise<void> {
+  if (typeof fetch !== 'function') return;
+  try {
+    const response = await fetch('./config.json', { cache: 'no-store' });
+    if (!response.ok) return;
+    const parsed = (await response.json()) as HubConfig;
+    runtime = {
+      clientId: clean(parsed.clientId),
+      tenantId: clean(parsed.tenantId),
+      redirectUri: clean(parsed.redirectUri),
+    };
+  } catch {
+    // No config.json, or it is not JSON. The .env values still apply.
+  }
+}
+
+export const getClientId = (): string | undefined =>
+  runtime.clientId ?? fromEnv('VITE_CLIENT_ID');
+
+export const getTenantId = (): string | undefined =>
+  runtime.tenantId ?? fromEnv('VITE_TENANT_ID');
 
 /** Resolved lazily: `window` does not exist when the module loads under a test runner. */
 export function resolveRedirectUri(): string {
-  const configured = import.meta.env.VITE_REDIRECT_URI as string | undefined;
+  const configured = runtime.redirectUri ?? fromEnv('VITE_REDIRECT_URI');
   if (configured) return configured;
   return typeof window === 'undefined' ? 'http://localhost:5173' : window.location.origin;
 }
 
-/** True once .env carries a real client and tenant ID. */
+/** True once a real client and tenant ID have been found, from either source. */
 export function isConfigured(): boolean {
   try {
-    required('VITE_CLIENT_ID', clientId);
-    required('VITE_TENANT_ID', tenantId);
+    required('VITE_CLIENT_ID', getClientId());
+    required('VITE_TENANT_ID', getTenantId());
     return true;
   } catch {
     return false;
@@ -34,8 +80,8 @@ export function isConfigured(): boolean {
 export function buildMsalConfig(): Configuration {
   return {
     auth: {
-      clientId: required('VITE_CLIENT_ID', clientId),
-      authority: `https://login.microsoftonline.com/${required('VITE_TENANT_ID', tenantId)}`,
+      clientId: required('VITE_CLIENT_ID', getClientId()),
+      authority: `https://login.microsoftonline.com/${required('VITE_TENANT_ID', getTenantId())}`,
       redirectUri: resolveRedirectUri(),
       postLogoutRedirectUri: resolveRedirectUri(),
       navigateToLoginRequestUrl: false,

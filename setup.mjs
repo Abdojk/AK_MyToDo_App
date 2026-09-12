@@ -155,6 +155,17 @@ async function askForIds() {
     'utf8',
   );
 
+  // A built bundle reads config.json, not .env, so keep the two in step when a
+  // build is present.
+  const distConfig = join(root, 'dist', 'config.json');
+  if (existsSync(join(root, 'dist'))) {
+    writeFileSync(
+      distConfig,
+      `${JSON.stringify({ clientId, tenantId, redirectUri: '' }, null, 2)}\n`,
+      'utf8',
+    );
+  }
+
   say('');
   say(`  Saved to ${envPath}`);
 }

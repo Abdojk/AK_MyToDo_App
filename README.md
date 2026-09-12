@@ -169,8 +169,22 @@ npm run dev              # http://localhost:5173
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | Type check, then a production bundle in `dist/` |
 
-Deploying to a hosted URL needs that URL added as a second SPA redirect URI in
-the registration, and `VITE_REDIRECT_URI` set to match.
+## Hosting it instead
+
+The build reads `config.json` at startup rather than compiling the IDs in, so one
+bundle serves any tenant and changing the IDs needs no rebuild.
+
+1. `npm run build`, which writes `dist/`.
+2. Upload the contents of `dist/` to any static host: an Azure Storage static
+   website, SharePoint, IIS, anything that serves files over HTTPS.
+3. Edit `config.json` beside `index.html` and paste in the two IDs. Leave
+   `redirectUri` empty to use whatever address the page is served from.
+4. Add that address as a second **Single-page application** redirect URI in the
+   Entra registration.
+
+The page stays a pure client: tokens live in the browser's session storage and
+the Graph calls go from the browser straight to Microsoft. The host only ever
+serves static files and never sees mailbox data.
 
 ## Layout
 

@@ -1,0 +1,6 @@
+{
+  "_comment": "Paste the two IDs from the Entra ID app registration. Editing this file needs no rebuild. Leave redirectUri empty to use the address the page is served from.",
+  "clientId": "",
+  "tenantId": "",
+  "redirectUri": ""
+}

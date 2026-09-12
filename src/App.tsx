@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IPublicClientApplication } from '@azure/msal-browser';
 import { useAuth } from './auth/useAuth';
-import { isConfigured, tenantId } from './auth/msalConfig';
+import { getTenantId, isConfigured } from './auth/msalConfig';
 import { GraphClient } from './graph/client';
 import { loadTasks } from './graph/todo';
 import { completeTask, reopenTask, rescheduleTask } from './graph/write';
@@ -67,7 +67,7 @@ export function App({ msal }: Props) {
       const [messages, calendar, planner] = await Promise.all([
         fetchFlaggedMessages(client),
         fetchCalendarEvents(client, readAt, zone),
-        fetchPlannerTasks(client, tenantId),
+        fetchPlannerTasks(client, getTenantId()),
       ]);
 
       const tasks = messages ? enrichTasks(todo, messages) : todo;
@@ -196,7 +196,7 @@ export function App({ msal }: Props) {
         previous,
         plannerItem({ ...task, percentComplete: 100 }),
         async (client) => {
-          const fresh = await completePlannerTask(client, task, tenantId);
+          const fresh = await completePlannerTask(client, task, getTenantId());
           return fresh ? plannerItem(fresh) : null;
         },
       );
@@ -211,7 +211,7 @@ export function App({ msal }: Props) {
         plannerItem(task),
         plannerItem({ ...task, due }),
         async (client) => {
-          const fresh = await reschedulePlannerTask(client, task, due, tenantId);
+          const fresh = await reschedulePlannerTask(client, task, due, getTenantId());
           return fresh ? plannerItem(fresh) : null;
         },
       );
@@ -248,7 +248,7 @@ export function App({ msal }: Props) {
         plannerItem({ ...task, percentComplete: 100 }),
         undoItem,
         async (client) => {
-          const fresh = await reopenPlannerTask(client, task, tenantId);
+          const fresh = await reopenPlannerTask(client, task, getTenantId());
           return fresh ? plannerItem(fresh) : undoItem;
         },
       );

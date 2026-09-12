@@ -15,10 +15,10 @@ export function SignInPanel({ onSignIn, busy, error, configured }: Props) {
 
       {!configured && (
         <div className="notice notice-error">
-          <strong>Configuration missing.</strong> Copy <code>.env.example</code> to{' '}
-          <code>.env</code> and fill in <code>VITE_CLIENT_ID</code> and{' '}
-          <code>VITE_TENANT_ID</code> from the Entra ID app registration. The
-          README covers the registration steps.
+          <strong>Configuration missing.</strong> Running it yourself: use{' '}
+          <code>start.cmd</code>, which asks for the two IDs. Hosted: put them in{' '}
+          <code>config.json</code> beside this page. Both come from the Entra ID
+          app registration, which the README covers.
         </div>
       )}
 
