@@ -81,3 +81,60 @@ export interface HubTask {
   receivedDateTime: Date | null;
   lastModified: Date | null;
 }
+
+/** Microsoft Graph event, trimmed to the fields the Hub reads. */
+export interface RawEvent {
+  id: string;
+  subject?: string | null;
+  start?: GraphDateTimeTimeZone | null;
+  end?: GraphDateTimeTimeZone | null;
+  isAllDay?: boolean | null;
+  isCancelled?: boolean | null;
+  isOnlineMeeting?: boolean | null;
+  isOrganizer?: boolean | null;
+  location?: { displayName?: string | null } | null;
+  organizer?: {
+    emailAddress?: { name?: string | null; address?: string | null };
+  } | null;
+  responseStatus?: { response?: string | null } | null;
+  showAs?: string | null;
+  type?: string | null;
+  webLink?: string | null;
+}
+
+/** A calendar occurrence as the Hub renders it. */
+export interface HubEvent {
+  id: string;
+  subject: string;
+  start: Date;
+  end: Date;
+  /** An all-day event carries a floating midnight, not an instant in any zone. */
+  isAllDay: boolean;
+  location: string | null;
+  organiser: string | null;
+  /** free, tentative, busy, oof, workingElsewhere, unknown. */
+  showAs: string;
+  isOnlineMeeting: boolean;
+  isOrganiser: boolean;
+  /** The occurrence belongs to a recurring series. */
+  isRecurring: boolean;
+  outlookUrl: string;
+}
+
+/**
+ * One entry on the timeline.
+ *
+ * The union wraps rather than widens, so HubTask keeps the shape every existing
+ * reader and test expects.
+ */
+export type HubItem =
+  | { kind: 'task'; task: HubTask }
+  | { kind: 'event'; event: HubEvent };
+
+export function taskItem(task: HubTask): HubItem {
+  return { kind: 'task', task };
+}
+
+export function eventItem(event: HubEvent): HubItem {
+  return { kind: 'event', event };
+}

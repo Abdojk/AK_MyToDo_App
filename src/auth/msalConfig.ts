@@ -66,7 +66,12 @@ export function buildMsalConfig(): Configuration {
  * Mail.ReadBasic here and from the app registration to drop sender names and run
  * on Microsoft To Do data alone.
  */
-export const graphScopes = ['User.Read', 'Tasks.ReadWrite', 'Mail.ReadBasic'];
+export const graphScopes = [
+  'User.Read',
+  'Tasks.ReadWrite',
+  'Mail.ReadBasic',
+  'Calendars.ReadBasic',
+];
 
 export const loginRequest: PopupRequest = { scopes: graphScopes };
 

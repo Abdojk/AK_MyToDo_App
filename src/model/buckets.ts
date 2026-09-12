@@ -1,25 +1,30 @@
 import { civilDayNumber } from './dates';
-import type { Bucket, HubTask } from './types';
+import type { Bucket, HubItem, HubTask } from './types';
 import { BUCKET_ORDER } from './types';
 
 /**
- * Place a due date on the timeline by comparing calendar days in `zone`, so a
- * task due at 23:00 local time stays in Today rather than sliding into Tomorrow.
+ * Place a date on the timeline by comparing calendar days, so a task due at 23:00
+ * local time stays in Today rather than sliding into Tomorrow.
+ *
+ * `floating` marks a value whose midnight belongs to no zone — an all-day event,
+ * which Graph stores at midnight and which must not be converted into the
+ * viewer's zone, or it moves a day for any zone behind UTC.
  */
 export function bucketOf(
-  due: Date | null,
+  date: Date | null,
   now: Date,
   zone: string,
+  floating = false,
 ): Bucket {
-  if (!due) return 'noDueDate';
+  if (!date) return 'noDueDate';
 
-  const dueDay = civilDayNumber(due, zone);
+  const day = civilDayNumber(date, floating ? 'UTC' : zone);
   const today = civilDayNumber(now, zone);
 
-  if (dueDay < today) return 'overdue';
-  if (dueDay === today) return 'today';
-  if (dueDay === today + 1) return 'tomorrow';
-  if (dueDay <= today + 7) return 'next7';
+  if (day < today) return 'overdue';
+  if (day === today) return 'today';
+  if (day === today + 1) return 'tomorrow';
+  if (day <= today + 7) return 'next7';
   return 'later';
 }
 
@@ -28,32 +33,55 @@ export function isClosed(task: HubTask): boolean {
   return task.status === 'completed';
 }
 
-/** Group open tasks into the six timeline columns, each sorted by due date. */
-export function groupByBucket(
-  tasks: HubTask[],
+/** The date an item sits on, and whether that date floats. */
+function anchorOf(item: HubItem): { date: Date | null; floating: boolean } {
+  return item.kind === 'task'
+    ? { date: item.task.due, floating: false }
+    : { date: item.event.start, floating: item.event.isAllDay };
+}
+
+const IMPORTANCE_RANK = { high: 0, normal: 1, low: 2 } as const;
+
+function compare(a: HubItem, b: HubItem): number {
+  const aTime = anchorOf(a).date?.getTime() ?? Number.POSITIVE_INFINITY;
+  const bTime = anchorOf(b).date?.getTime() ?? Number.POSITIVE_INFINITY;
+  if (aTime !== bTime) return aTime - bTime;
+
+  // A task's due date sits at local midnight, so on a shared day it already
+  // heads the column. Equal timestamps fall back to task before event.
+  if (a.kind !== b.kind) return a.kind === 'task' ? -1 : 1;
+
+  if (a.kind === 'task' && b.kind === 'task') {
+    const rank =
+      IMPORTANCE_RANK[a.task.importance] - IMPORTANCE_RANK[b.task.importance];
+    if (rank !== 0) return rank;
+    return a.task.title.localeCompare(b.task.title);
+  }
+
+  if (a.kind === 'event' && b.kind === 'event') {
+    return a.event.subject.localeCompare(b.event.subject);
+  }
+
+  return 0;
+}
+
+/** Group open tasks and calendar occurrences into the six timeline columns. */
+export function groupItems(
+  items: HubItem[],
   now: Date,
   zone: string,
-): Record<Bucket, HubTask[]> {
+): Record<Bucket, HubItem[]> {
   const grouped = Object.fromEntries(
-    BUCKET_ORDER.map((b) => [b, [] as HubTask[]]),
-  ) as Record<Bucket, HubTask[]>;
+    BUCKET_ORDER.map((b) => [b, [] as HubItem[]]),
+  ) as Record<Bucket, HubItem[]>;
 
-  for (const task of tasks) {
-    if (isClosed(task)) continue;
-    grouped[bucketOf(task.due, now, zone)].push(task);
+  for (const item of items) {
+    if (item.kind === 'task' && isClosed(item.task)) continue;
+    const { date, floating } = anchorOf(item);
+    grouped[bucketOf(date, now, zone, floating)].push(item);
   }
 
-  const importanceRank = { high: 0, normal: 1, low: 2 } as const;
-  for (const bucket of BUCKET_ORDER) {
-    grouped[bucket].sort((a, b) => {
-      const aTime = a.due?.getTime() ?? Number.POSITIVE_INFINITY;
-      const bTime = b.due?.getTime() ?? Number.POSITIVE_INFINITY;
-      if (aTime !== bTime) return aTime - bTime;
-      const rank = importanceRank[a.importance] - importanceRank[b.importance];
-      if (rank !== 0) return rank;
-      return a.title.localeCompare(b.title);
-    });
-  }
+  for (const bucket of BUCKET_ORDER) grouped[bucket].sort(compare);
 
   return grouped;
 }

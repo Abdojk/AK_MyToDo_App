@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { bucketOf, groupByBucket } from './buckets';
+import { bucketOf, groupItems } from './buckets';
 import { resolveGraphDateTime } from './dates';
 import { normaliseTask } from './normalise';
+import { taskItem } from './types';
 import type { HubTask, RawTodoTask } from './types';
 
 const ZONE = 'Asia/Amman';
@@ -60,7 +61,7 @@ describe('bucketOf', () => {
   });
 });
 
-describe('groupByBucket', () => {
+describe('groupItems', () => {
   const base: HubTask = {
     id: 'x',
     title: 'Task',
@@ -76,8 +77,8 @@ describe('groupByBucket', () => {
   };
 
   it('drops completed tasks', () => {
-    const grouped = groupByBucket(
-      [{ ...base, id: 'a', status: 'completed', due: dueAt('2026-09-12T09:00:00') }],
+    const grouped = groupItems(
+      [taskItem({ ...base, id: 'a', status: 'completed', due: dueAt('2026-09-12T09:00:00') })],
       NOW,
       ZONE,
     );
@@ -85,16 +86,25 @@ describe('groupByBucket', () => {
   });
 
   it('sorts a column by due date, then importance', () => {
-    const grouped = groupByBucket(
+    const grouped = groupItems(
       [
-        { ...base, id: 'late', due: dueAt('2026-09-12T17:00:00') },
-        { ...base, id: 'early', due: dueAt('2026-09-12T08:00:00') },
-        { ...base, id: 'early-high', due: dueAt('2026-09-12T08:00:00'), importance: 'high' },
+        taskItem({ ...base, id: 'late', due: dueAt('2026-09-12T17:00:00') }),
+        taskItem({ ...base, id: 'early', due: dueAt('2026-09-12T08:00:00') }),
+        taskItem({
+          ...base,
+          id: 'early-high',
+          due: dueAt('2026-09-12T08:00:00'),
+          importance: 'high',
+        }),
       ],
       NOW,
       ZONE,
     );
-    expect(grouped.today.map((t) => t.id)).toEqual(['early-high', 'early', 'late']);
+    expect(grouped.today.map((i) => (i.kind === 'task' ? i.task.id : ''))).toEqual([
+      'early-high',
+      'early',
+      'late',
+    ]);
   });
 });
 

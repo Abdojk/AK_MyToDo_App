@@ -6,12 +6,14 @@ import { GraphClient } from './graph/client';
 import { loadFlaggedTasks } from './graph/todo';
 import { completeTask, reopenTask, rescheduleTask } from './graph/write';
 import { enrichTasks, fetchFlaggedMessages } from './graph/mail';
+import { HORIZON_DAYS, fetchCalendarEvents } from './graph/calendar';
 import { SignInPanel } from './components/SignInPanel';
 import { Timeline } from './components/Timeline';
 import { viewerZone } from './model/dates';
 import { normaliseTask } from './model/normalise';
 import { applyTask, mergeWritten } from './model/mutate';
-import type { HubTask, RawTodoTask } from './model/types';
+import { eventItem, taskItem } from './model/types';
+import type { HubEvent, HubItem, HubTask, RawTodoTask } from './model/types';
 
 interface Props {
   msal: IPublicClientApplication;
@@ -26,7 +28,9 @@ export function App({ msal }: Props) {
   const [tasks, setTasks] = useState<HubTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [events, setEvents] = useState<HubEvent[]>([]);
   const [enriched, setEnriched] = useState(false);
+  const [calendarOn, setCalendarOn] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -44,10 +48,17 @@ export function App({ msal }: Props) {
       const { listId: flaggedListId, tasks: flagged } = await loadFlaggedTasks(client);
       setListId(flaggedListId);
 
-      // Sender names are a bonus. A failure here must not cost the timeline.
-      const messages = await fetchFlaggedMessages(client);
+      // Sender names and the calendar are both optional. A failure in either
+      // must not cost the timeline its tasks.
+      const readAt = new Date();
+      const [messages, calendar] = await Promise.all([
+        fetchFlaggedMessages(client),
+        fetchCalendarEvents(client, readAt, zone),
+      ]);
       setEnriched(messages !== null);
       setTasks(messages ? enrichTasks(flagged, messages) : flagged);
+      setCalendarOn(calendar !== null);
+      setEvents(calendar ?? []);
 
       setUndoTask(null);
       setNow(new Date());
@@ -57,7 +68,7 @@ export function App({ msal }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [auth.account, auth.getToken]);
+  }, [auth.account, auth.getToken, zone]);
 
   useEffect(() => {
     void refresh();
@@ -151,6 +162,7 @@ export function App({ msal }: Props) {
   }
 
   const openCount = tasks.filter((t) => t.status !== 'completed').length;
+  const items: HubItem[] = [...tasks.map(taskItem), ...events.map(eventItem)];
 
   return (
     <main className="shell">
@@ -158,8 +170,10 @@ export function App({ msal }: Props) {
         <div>
           <h1>AK MyToDo Hub</h1>
           <p className="lede">
-            {openCount} flagged {openCount === 1 ? 'email' : 'emails'} ·{' '}
-            {auth.account.username} · {zone}
+            {openCount} flagged {openCount === 1 ? 'email' : 'emails'}
+            {calendarOn &&
+              `, ${events.length} ${events.length === 1 ? 'event' : 'events'} to ${HORIZON_DAYS} days`}{' '}
+            · {auth.account.username} · {zone}
           </p>
         </div>
         <div className="topbar-actions">
@@ -181,6 +195,14 @@ export function App({ msal }: Props) {
         </div>
       )}
 
+      {!calendarOn && !loading && !loadError && (
+        <div className="notice">
+          Calendar access is unavailable for this account. The timeline below
+          shows tasks only. Add <code>Calendars.ReadBasic</code> to the app
+          registration to see meetings.
+        </div>
+      )}
+
       {undoTask && (
         <div className="notice undo-bar">
           <span>
@@ -193,7 +215,7 @@ export function App({ msal }: Props) {
       )}
 
       <Timeline
-        tasks={tasks}
+        items={items}
         now={now}
         zone={zone}
         pendingIds={pendingIds}

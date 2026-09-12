@@ -14,6 +14,8 @@
   --overdue-soft: #fbecea;
   --high: #8a5a00;
   --high-soft: #fbf2dd;
+  --event: #4a6f5d;
+  --event-soft: #eef3f0;
 
   color-scheme: light dark;
 }
@@ -32,6 +34,8 @@
     --overdue-soft: #33211e;
     --high: #e5bd6a;
     --high-soft: #302713;
+    --event: #86bda2;
+    --event-soft: #1c2621;
   }
 }
 
@@ -327,4 +331,38 @@ button.link-button:disabled { color: var(--ink-soft); text-decoration: none; }
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* Event cards */
+
+.card-event {
+  border-left-color: var(--event);
+  background: var(--event-soft);
+}
+
+.event-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.event-clock {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--event);
+  font-variant-numeric: tabular-nums;
+}
+
+.pill-online {
+  border-color: var(--event);
+  color: var(--event);
+}
+
+.event-detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
 }

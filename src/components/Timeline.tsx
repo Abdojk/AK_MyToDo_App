@@ -1,10 +1,10 @@
 import { BucketColumn } from './BucketColumn';
-import { groupByBucket } from '../model/buckets';
+import { groupItems } from '../model/buckets';
 import { BUCKET_ORDER } from '../model/types';
-import type { HubTask } from '../model/types';
+import type { HubItem, HubTask } from '../model/types';
 
 interface Props {
-  tasks: HubTask[];
+  items: HubItem[];
   now: Date;
   zone: string;
   pendingIds: string[];
@@ -13,14 +13,14 @@ interface Props {
 }
 
 export function Timeline({
-  tasks,
+  items,
   now,
   zone,
   pendingIds,
   onComplete,
   onReschedule,
 }: Props) {
-  const grouped = groupByBucket(tasks, now, zone);
+  const grouped = groupItems(items, now, zone);
 
   return (
     <div className="timeline">
@@ -28,7 +28,7 @@ export function Timeline({
         <BucketColumn
           key={bucket}
           bucket={bucket}
-          tasks={grouped[bucket]}
+          items={grouped[bucket]}
           zone={zone}
           pendingIds={pendingIds}
           onComplete={onComplete}
