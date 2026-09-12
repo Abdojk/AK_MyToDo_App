@@ -65,6 +65,9 @@ describe('groupItems', () => {
   const base: HubTask = {
     id: 'x',
     title: 'Task',
+    listId: 'flagged',
+    listName: 'Flagged email',
+    isFlaggedEmail: true,
     due: null,
     status: 'notStarted',
     importance: 'normal',
@@ -108,6 +111,8 @@ describe('groupItems', () => {
   });
 });
 
+const LIST = { id: 'flagged', displayName: 'Flagged email', isFlaggedEmail: true };
+
 describe('normaliseTask', () => {
   const raw: RawTodoTask = {
     id: 'AAMkADIyAAAhrbPWAAA=',
@@ -130,7 +135,7 @@ describe('normaliseTask', () => {
   };
 
   it('maps every field the timeline renders', () => {
-    const task = normaliseTask(raw);
+    const task = normaliseTask(raw, LIST);
     expect(task.id).toBe(raw.id);
     expect(task.title).toBe('RE: D365 F&O month-end close');
     expect(task.due?.toISOString()).toBe('2026-09-15T00:00:00.000Z');
@@ -141,8 +146,16 @@ describe('normaliseTask', () => {
     expect(task.lastModified?.toISOString()).toBe('2026-09-10T11:22:33.000Z');
   });
 
+  it('carries the list it was read from onto the task', () => {
+    const custom = { id: 'AAMk2=', displayName: 'Engicon', isFlaggedEmail: false };
+    const task = normaliseTask(raw, custom);
+    expect(task.listId).toBe('AAMk2=');
+    expect(task.listName).toBe('Engicon');
+    expect(task.isFlaggedEmail).toBe(false);
+  });
+
   it('survives a task with no due date, body, or linked resource', () => {
-    const task = normaliseTask({ id: 'bare' });
+    const task = normaliseTask({ id: 'bare' }, LIST);
     expect(task.due).toBeNull();
     expect(task.title).toBe('(no subject)');
     expect(task.outlookUrl).toBeNull();

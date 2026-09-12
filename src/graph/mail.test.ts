@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { enrichTasks } from './mail';
 import type { HubTask } from '../model/types';
 
-const task = (id: string, title: string): HubTask => ({
+const task = (id: string, title: string, isFlaggedEmail = true): HubTask => ({
   id,
   title,
+  listId: isFlaggedEmail ? 'flagged' : 'private',
+  listName: isFlaggedEmail ? 'Flagged email' : 'Tasks',
+  isFlaggedEmail,
   due: null,
   status: 'notStarted',
   importance: 'normal',
@@ -43,6 +46,23 @@ describe('enrichTasks', () => {
       ],
     );
     expect(result.sender).toBeNull();
+  });
+
+  it('leaves a task from another list alone, even on an identical subject', () => {
+    // A private task called "Invoice" must not pick up the sender of an
+    // unrelated flagged email with the same subject.
+    const [flagged, privateTask] = enrichTasks(
+      [task('1', 'Invoice'), task('2', 'Invoice', false)],
+      [
+        {
+          id: 'm1',
+          subject: 'Invoice',
+          from: { emailAddress: { name: 'Accounts Payable' } },
+        },
+      ],
+    );
+    expect(flagged.sender).toBe('Accounts Payable');
+    expect(privateTask.sender).toBeNull();
   });
 
   it('keeps a linked-resource URL in preference to the message link', () => {

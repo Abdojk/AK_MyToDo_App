@@ -58,6 +58,10 @@ function senderOf(message: RawMessage): string {
  * A flagged email becomes a task whose title is the message subject, so the
  * subject is the join key. Subjects that appear on more than one flagged message
  * are ambiguous and are skipped rather than guessed at.
+ *
+ * Only tasks from the Flagged email list are joined. A private task called
+ * "Invoice" must not pick up the sender of an unrelated flagged email with the
+ * same subject.
  */
 export function enrichTasks(tasks: HubTask[], messages: RawMessage[]): HubTask[] {
   const bySubject = new Map<string, RawMessage | 'ambiguous'>();
@@ -68,6 +72,7 @@ export function enrichTasks(tasks: HubTask[], messages: RawMessage[]): HubTask[]
   }
 
   return tasks.map((task) => {
+    if (!task.isFlaggedEmail) return task;
     const match = bySubject.get(subjectKey(task.title));
     if (!match || match === 'ambiguous') return task;
     return {

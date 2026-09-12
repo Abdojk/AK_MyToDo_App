@@ -3,7 +3,7 @@ import type { IPublicClientApplication } from '@azure/msal-browser';
 import { useAuth } from './auth/useAuth';
 import { isConfigured, tenantId } from './auth/msalConfig';
 import { GraphClient } from './graph/client';
-import { loadFlaggedTasks } from './graph/todo';
+import { loadTasks } from './graph/todo';
 import { completeTask, reopenTask, rescheduleTask } from './graph/write';
 import { enrichTasks, fetchFlaggedMessages } from './graph/mail';
 import { HORIZON_DAYS, fetchCalendarEvents } from './graph/calendar';
@@ -16,7 +16,7 @@ import {
 import { SignInPanel } from './components/SignInPanel';
 import { Timeline } from './components/Timeline';
 import { viewerZone } from './model/dates';
-import { normaliseTask } from './model/normalise';
+import { listRefOf, normaliseTask } from './model/normalise';
 import { applyItem, mergeWritten } from './model/mutate';
 import { eventItem, itemKey, plannerItem, taskItem } from './model/types';
 import type { HubItem, HubPlannerTask, HubTask } from './model/types';
@@ -37,7 +37,6 @@ export function App({ msal }: Props) {
   const configured = isConfigured();
   const zone = viewerZone();
 
-  const [listId, setListId] = useState<string | null>(null);
   const [items, setItems] = useState<HubItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,8 +59,7 @@ export function App({ msal }: Props) {
     setLoadError(null);
     try {
       const client = new GraphClient(auth.getToken);
-      const { listId: flaggedListId, tasks: flagged } = await loadFlaggedTasks(client);
-      setListId(flaggedListId);
+      const todo = await loadTasks(client);
 
       // Senders, calendar and Planner are all optional. A failure in any of them
       // must not cost the timeline its flagged email.
@@ -72,7 +70,7 @@ export function App({ msal }: Props) {
         fetchPlannerTasks(client, tenantId),
       ]);
 
-      const tasks = messages ? enrichTasks(flagged, messages) : flagged;
+      const tasks = messages ? enrichTasks(todo, messages) : todo;
       setSources({
         senders: messages !== null,
         calendar: calendar !== null,
@@ -149,7 +147,6 @@ export function App({ msal }: Props) {
 
   const handleComplete = useCallback(
     async (task: HubTask) => {
-      if (!listId) return;
       const previous = taskItem(task);
       const done = await mutate(
         previous,
@@ -158,18 +155,20 @@ export function App({ msal }: Props) {
           taskItem(
             mergeWritten(
               task,
-              normaliseTask(await completeTask(client, listId, task.id), []),
+              normaliseTask(
+                await completeTask(client, task.listId, task.id),
+                listRefOf(task),
+              ),
             ),
           ),
       );
       if (done) setUndoItem(previous);
     },
-    [mutate, listId],
+    [mutate],
   );
 
   const handleReschedule = useCallback(
     (task: HubTask, due: Date) => {
-      if (!listId) return;
       void mutate(
         taskItem(task),
         taskItem({ ...task, due }),
@@ -177,12 +176,15 @@ export function App({ msal }: Props) {
           taskItem(
             mergeWritten(
               task,
-              normaliseTask(await rescheduleTask(client, listId, task.id, due), []),
+              normaliseTask(
+                await rescheduleTask(client, task.listId, task.id, due),
+                listRefOf(task),
+              ),
             ),
           ),
       );
     },
-    [mutate, listId],
+    [mutate],
   );
 
   // Planner.
@@ -221,14 +223,19 @@ export function App({ msal }: Props) {
     if (!undoItem) return;
 
     if (undoItem.kind === 'task') {
-      if (!listId) return;
       const task = undoItem.task;
       const done = await mutate(
         taskItem({ ...task, status: 'completed' }),
         undoItem,
         async (client) =>
           taskItem(
-            mergeWritten(task, normaliseTask(await reopenTask(client, listId, task.id), [])),
+            mergeWritten(
+              task,
+              normaliseTask(
+                await reopenTask(client, task.listId, task.id),
+                listRefOf(task),
+              ),
+            ),
           ),
       );
       if (done) setUndoItem(null);
@@ -247,7 +254,7 @@ export function App({ msal }: Props) {
       );
       if (done) setUndoItem(null);
     }
-  }, [mutate, undoItem, listId]);
+  }, [mutate, undoItem]);
 
   const counts = useMemo(() => {
     let tasks = 0;
@@ -284,7 +291,7 @@ export function App({ msal }: Props) {
         <div>
           <h1>AK MyToDo Hub</h1>
           <p className="lede">
-            {counts.tasks} flagged {counts.tasks === 1 ? 'email' : 'emails'}
+            {counts.tasks} {counts.tasks === 1 ? 'task' : 'tasks'}
             {sources.planner && `, ${counts.planner} Planner`}
             {sources.calendar &&
               `, ${counts.events} ${counts.events === 1 ? 'event' : 'events'} to ${HORIZON_DAYS} days`}{' '}
@@ -305,8 +312,8 @@ export function App({ msal }: Props) {
 
       {!sources.senders && quiet && (
         <div className="notice">
-          Sender names are unavailable for this mailbox. Flagged email below reads
-          from Microsoft To Do alone.
+          Sender names are unavailable for this mailbox. Flagged-email cards below
+          show no sender.
         </div>
       )}
 
@@ -319,8 +326,8 @@ export function App({ msal }: Props) {
 
       {!sources.planner && quiet && (
         <div className="notice">
-          Planner is unavailable for this account. The timeline shows flagged email
-          and meetings only.
+          Planner is unavailable for this account. The timeline shows Microsoft To
+          Do and meetings only.
         </div>
       )}
 

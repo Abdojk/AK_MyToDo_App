@@ -69,6 +69,11 @@ export type Importance = 'low' | 'normal' | 'high';
 export interface HubTask {
   id: string;
   title: string;
+  /** The To Do list it lives in. Every write needs it. */
+  listId: string;
+  listName: string;
+  /** True for the built-in Flagged email list, which drives the From line. */
+  isFlaggedEmail: boolean;
   due: Date | null;
   status: string;
   importance: Importance;

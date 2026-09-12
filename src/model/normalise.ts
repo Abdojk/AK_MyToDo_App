@@ -1,6 +1,13 @@
 import { resolveGraphDateTime } from './dates';
 import type { HubTask, Importance, RawLinkedResource, RawTodoTask } from './types';
 
+/** The list a task was read from, carried onto the task for writes and display. */
+export interface TaskListRef {
+  id: string;
+  displayName: string;
+  isFlaggedEmail: boolean;
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -53,11 +60,15 @@ function pickOutlookUrl(resources: RawLinkedResource[]): string | null {
  */
 export function normaliseTask(
   raw: RawTodoTask,
+  list: TaskListRef,
   linked: RawLinkedResource[] = raw.linkedResources ?? [],
 ): HubTask {
   return {
     id: raw.id,
     title: raw.title?.trim() || '(no subject)',
+    listId: list.id,
+    listName: list.displayName,
+    isFlaggedEmail: list.isFlaggedEmail,
     due: resolveGraphDateTime(raw.dueDateTime),
     status: raw.status ?? 'notStarted',
     importance: toImportance(raw.importance),
@@ -77,4 +88,13 @@ export function subjectKey(subject: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+}
+
+/** The list a task belongs to, recovered from the task itself. */
+export function listRefOf(task: HubTask): TaskListRef {
+  return {
+    id: task.listId,
+    displayName: task.listName,
+    isFlaggedEmail: task.isFlaggedEmail,
+  };
 }

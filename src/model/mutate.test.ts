@@ -5,6 +5,9 @@ import type { HubPlannerTask, HubTask } from './types';
 
 const task = (over: Partial<HubTask> & { id: string }): HubTask => ({
   title: 'Task',
+  listId: 'flagged',
+  listName: 'Flagged email',
+  isFlaggedEmail: true,
   due: null,
   status: 'notStarted',
   importance: 'normal',

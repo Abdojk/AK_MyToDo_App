@@ -1,20 +1,12 @@
 import type { GraphClient } from './client';
 import { normaliseTask } from '../model/normalise';
+import type { TaskListRef } from '../model/normalise';
 import type {
   HubTask,
   RawLinkedResource,
   RawTodoTask,
   RawTodoTaskList,
 } from '../model/types';
-
-export class FlaggedListMissingError extends Error {
-  constructor() {
-    super(
-      'This mailbox has no built-in Flagged email list in Microsoft To Do. Flag an email in Outlook, then refresh.',
-    );
-    this.name = 'FlaggedListMissingError';
-  }
-}
 
 const TASK_SELECT = [
   'id',
@@ -30,16 +22,22 @@ const TASK_SELECT = [
   'lastModifiedDateTime',
 ].join(',');
 
-/** Locate the built-in Flagged email list by its well-known name. */
-export async function getFlaggedList(
-  client: GraphClient,
-): Promise<RawTodoTaskList> {
+/**
+ * Every To Do list in the mailbox.
+ *
+ * The built-in Flagged email list is one of them, marked by its well-known name.
+ * The rest are the built-in Tasks list and whatever lists the user has created —
+ * the same set the Planner app in Teams shows under My Tasks and My Plans.
+ */
+export async function getTaskLists(client: GraphClient): Promise<TaskListRef[]> {
   const lists = await client.getAll<RawTodoTaskList>(
     '/me/todo/lists?$select=id,displayName,wellknownListName',
   );
-  const flagged = lists.find((l) => l.wellknownListName === 'flaggedEmails');
-  if (!flagged) throw new FlaggedListMissingError();
-  return flagged;
+  return lists.map((list) => ({
+    id: list.id,
+    displayName: list.displayName?.trim() || 'Tasks',
+    isFlaggedEmail: list.wellknownListName === 'flaggedEmails',
+  }));
 }
 
 /**
@@ -71,11 +69,14 @@ export async function attachLinkedResources(
   listId: string,
   tasks: RawTodoTask[],
 ): Promise<Map<string, RawLinkedResource[]>> {
-  const pending = tasks.filter((t) => t.linkedResources === undefined || t.linkedResources === null);
   const byTask = new Map<string, RawLinkedResource[]>();
   for (const task of tasks) {
     if (task.linkedResources) byTask.set(task.id, task.linkedResources);
   }
+
+  const pending = tasks.filter(
+    (t) => t.linkedResources === undefined || t.linkedResources === null,
+  );
   if (pending.length === 0) return byTask;
 
   const requests = pending.map((task, index) => ({
@@ -92,21 +93,24 @@ export async function attachLinkedResources(
   return byTask;
 }
 
-export interface FlaggedRead {
-  /** The Flagged email list id, which every write needs. */
-  listId: string;
-  tasks: HubTask[];
-}
-
-/** The whole read: flagged list, its tasks, their links, normalised for the UI. */
-export async function loadFlaggedTasks(
+/** Every task in one list, normalised and carrying that list's identity. */
+export async function loadList(
   client: GraphClient,
-): Promise<FlaggedRead> {
-  const list = await getFlaggedList(client);
+  list: TaskListRef,
+): Promise<HubTask[]> {
   const raw = await getTasks(client, list.id);
   const links = await attachLinkedResources(client, list.id, raw);
-  return {
-    listId: list.id,
-    tasks: raw.map((task) => normaliseTask(task, links.get(task.id) ?? [])),
-  };
+  return raw.map((task) => normaliseTask(task, list, links.get(task.id) ?? []));
+}
+
+/**
+ * The whole To Do read: every list, its tasks, and their links.
+ *
+ * Each task carries its own listId, because a write has to reach the list the
+ * task actually lives in.
+ */
+export async function loadTasks(client: GraphClient): Promise<HubTask[]> {
+  const lists = await getTaskLists(client);
+  const perList = await Promise.all(lists.map((list) => loadList(client, list)));
+  return perList.flat();
 }

@@ -1,6 +1,6 @@
 # AK MyToDo Hub
 
-Every flagged Outlook email, Planner task, and calendar occurrence in
+Every Microsoft To Do task, Planner task, and calendar occurrence in
 `Akhoury@info-sys.com`, laid out by date:
 **Overdue · Today · Tomorrow · Next 7 days · Later · No due date**.
 
@@ -17,13 +17,14 @@ Microsoft To Do. Nothing writes to the message resource.
 
 ## How it reads the mailbox
 
-Flagging an email in Outlook creates a task in the built-in **Flagged email**
-list in Microsoft To Do. Microsoft Graph exposes that list as the `todoTaskList`
-whose `wellknownListName` is `flaggedEmails`. The Hub reads it:
+The Hub reads **every** Microsoft To Do list: the built-in **Tasks** list, any
+list you created, and the built-in **Flagged email** list, which is where an
+email flagged in Outlook becomes a task (Graph marks it with
+`wellknownListName: flaggedEmails`).
 
 ```
-GET   /me/todo/lists                          → find wellknownListName = flaggedEmails
-GET   /me/todo/lists/{id}/tasks               → the flagged emails, with due dates
+GET   /me/todo/lists                          → every list, flagged email included
+GET   /me/todo/lists/{id}/tasks               → each list's tasks, with due dates
 POST  /$batch  (GET linkedResources per task) → deep link back to each email
 GET   /me/messages?$filter=flag/flagStatus…   → optional: sender name
 PATCH /me/todo/lists/{id}/tasks/{taskId}      → Done and Move to
@@ -41,6 +42,26 @@ email.
 `PATCH` is the only write verb the client issues, and it reaches only the two task
 endpoints above. See `src/graph/write.ts` and `src/graph/planner.ts`.
 
+## What about Teams tasks?
+
+They are already here. The Tasks app in Teams **is** the Planner app — "Prior to
+March 2024, this app was named Tasks by Planner and To Do"
+(`microsoftteams/manage-planner-app`). Its sections map onto what the Hub reads:
+
+| Teams: Planner app | Where it lives | In the Hub |
+|---|---|---|
+| My Tasks → Private Tasks | Microsoft To Do, in Exchange | Yes |
+| My Tasks → Flagged emails | Microsoft To Do, in Exchange | Yes |
+| My Tasks → Assigned to me | Planner, in Azure | Yes |
+| My Plans → To Do lists | Microsoft To Do, in Exchange | Yes |
+| My Plans → basic plans | Planner, in Azure | Assigned tasks only |
+| My Plans → premium plans | Project for the web, in Dataverse | Unverified |
+
+No Graph API exposes anything called a Teams task. Premium plans, Loop-component
+plans, and shared or private channel plans are documented as separate stores;
+whether `/me/planner/tasks` already returns tasks assigned from them is untested
+against this tenant.
+
 ## Writing back
 
 Both actions apply optimistically: the card moves column, or leaves the timeline,
@@ -51,6 +72,9 @@ not hold.
 
 Completing a task raises an undo bar. **Undo** patches the status back to
 `notStarted`. The bar clears on the next refresh.
+
+Each task carries the id of the list it lives in, so a write reaches that list
+rather than the flagged one. `src/graph/todo.test.ts` pins it.
 
 A due date is stored as midnight of the chosen calendar day **in your zone**,
 converted to a UTC instant and sent as `{"dateTime": "…", "timeZone": "UTC"}`. It
@@ -78,7 +102,7 @@ Run once, in the info-sys.com tenant.
    |---|---|
    | `User.Read` | Sign-in and the account name in the header |
    | `Tasks.ReadWrite` | The Flagged email list, its tasks, and the two write actions |
-   | `Mail.ReadBasic` | Optional: the sender name on each task card |
+   | `Mail.ReadBasic` | Optional: the sender name on flagged-email cards |
    | `Calendars.ReadBasic` | Optional: meetings on the timeline |
 
    `Tasks.ReadWrite` also covers Planner: reading your assigned tasks, reading
@@ -132,7 +156,7 @@ src/
 │  └─ useAuth.ts         signIn, signOut, getToken
 ├─ graph/
 │  ├─ client.ts          bearer auth, paging, $batch, PATCH, 429 back-off
-│  ├─ todo.ts            flagged list → tasks → linked resources
+│  ├─ todo.ts            every To Do list → tasks → linked resources
 │  ├─ write.ts           completeTask, reopenTask, rescheduleTask
 │  ├─ calendar.ts        calendarView over a 30-day window, optional
 │  ├─ planner.ts         Planner read and writes, ETag handling, optional
@@ -223,8 +247,10 @@ mailbox in Graph Explorer, and simplify the code once you know the answer.
 2. **`$filter=flag/flagStatus eq 'flagged'` on `/me/messages`.** Attempted; a
    rejection disables sender enrichment and shows a banner (`src/graph/mail.ts`).
 3. **Whether `linkedResource.externalId` holds a Graph message id.** Not relied
-   on. Sender enrichment joins on the email subject instead, and skips any
-   subject that matches more than one flagged message.
+   on. Sender enrichment joins on the email subject instead, skips any subject
+   that matches more than one flagged message, and now only ever touches tasks
+   from the Flagged email list — a private task called "Invoice" must not pick up
+   the sender of an unrelated flagged email with the same subject.
 4. **Whether completing the To Do task marks the Outlook flag complete.** The task
    in the `flaggedEmails` list is the flag's counterpart, but no Microsoft Learn
    page consulted states what happens to `message.flag.flagStatus` when the task

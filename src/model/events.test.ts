@@ -144,6 +144,9 @@ describe('groupItems with a mixed day', () => {
   const task: HubTask = {
     id: 't1',
     title: 'D365 month-end checklist',
+    listId: 'flagged',
+    listName: 'Flagged email',
+    isFlaggedEmail: true,
     // A task's due date sits at local midnight.
     due: new Date('2026-09-11T21:00:00Z'),
     status: 'notStarted',

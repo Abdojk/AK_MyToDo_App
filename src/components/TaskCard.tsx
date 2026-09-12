@@ -31,10 +31,17 @@ export function TaskCard({
       </div>
 
       <dl className="card-meta">
-        {task.sender && (
+        {task.isFlaggedEmail ? (
+          task.sender && (
+            <>
+              <dt>From</dt>
+              <dd>{task.sender}</dd>
+            </>
+          )
+        ) : (
           <>
-            <dt>From</dt>
-            <dd>{task.sender}</dd>
+            <dt>List</dt>
+            <dd>{task.listName}</dd>
           </>
         )}
         <dt>Due</dt>

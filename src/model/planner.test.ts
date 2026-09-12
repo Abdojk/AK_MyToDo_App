@@ -116,6 +116,9 @@ describe('groupItems with all three sources', () => {
   const todo: HubTask = {
     id: 't1',
     title: 'D365 month-end checklist',
+    listId: 'flagged',
+    listName: 'Flagged email',
+    isFlaggedEmail: true,
     due: new Date('2026-09-11T21:00:00Z'), // local midnight on the 12th in Amman
     status: 'notStarted',
     importance: 'normal',
